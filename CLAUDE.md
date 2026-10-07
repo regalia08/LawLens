@@ -14,6 +14,8 @@
 - `eval/questions.jsonl`: 평가셋. 일상어 질문 55개(정답 조문 = 법/시행령/시행규칙) + 범위 밖 8개(`expected: refuse`)
 - `eval_retrieval.py`: hit@1/3/5, MRR@10 (조문 단위, 정답 중 하나라도 맞으면 hit) + 기준선 BM25(글자 2-gram)
 - `test_eval_set.py`: 정답 조문이 실제 인덱스에 있는지(삭제/만료/오타) + 지표 계산 테스트
+- `term_expansion.py`: 일상용어→법령용어 쿼리 확장 (법제처 dlytrm/dlytrmRlt), 응답 캐시 `data/terms/dlytrm_cache.json`
+- `test_term_expansion.py`: 확장 로직 테스트 (네트워크 없음)
 - 실제 응답으로 검증함 (기준일 2026-10-07)
   - 근로기준법(시행 20261002): 132조 / 삭제 1 / 만료 1 / 일부만료 1 / 청크 152
   - 시행령(시행 20251023): 80조 / 삭제 5 / 부분만료 문구 2 (조문 유지) / 청크 78
@@ -24,6 +26,7 @@
 python -m unittest -v
 python fetch_law.py [법령명 ...] [--date YYYY-MM-DD]   # 기본: 근로기준법 3종, 오늘 기준
 python eval_retrieval.py --today YYYY-MM-DD --show-misses
+python eval_retrieval.py --today YYYY-MM-DD --retriever bm25+terms [--fetch-terms]   # 캐시만으로 재현, --fetch-terms는 OC 필요
 python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --max-chars 1000 --out out
 # -> out/articles.jsonl, out/chunks.jsonl, 통계, 만료 문구 검토 목록
 ```
@@ -60,6 +63,13 @@ python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --
 - 기준선 BM25 (기준일 2026-10-07, 청크 251): hit@1 0.327 / hit@3 0.400 / hit@5 0.473 / MRR@10 0.397
 - 놓치는 주 원인은 어휘 차이: 월급↔임금, 잘리다↔해고, 주휴수당↔유급휴일, 야근↔연장근로, 빌린 돈↔전차금.
   → 로드맵 2번(일상용어→법령용어 확장)과 임베딩의 효과를 이 숫자 대비로 측정한다.
+- BM25 + 일상용어 확장 (w=0.5, 기본값): hit@1 0.436 / hit@3 0.509 / hit@5 0.600 / MRR@10 0.502
+  - 확장 규칙: 어절의 가장 긴 앞부분(2자+)을 사전 조회(조사 제거 대용), 반의어 제외, 조문에 실제 나오는 용어만, 가중치 w.
+  - 어떤 단어를 조회할지 사람이 고르지 않는다 (평가셋 오답 보고 동의어 수작업 추가 = 과적합).
+  - 가중치 참고: w=0.3 hit@3 0.473, w=1.0 hit@3 0.582(hit@1은 0.418로 하락). 55문항으로 튜닝하면 과적합이라
+    사전에 정한 0.5 유지. 더 튜닝하려면 평가셋을 dev/test로 나눌 것.
+  - 남은 문제: 흔한 단어의 잡음 확장(회사→기업·법인·자사, 사람→자연인, 기한→숫자들),
+    사전에 없는 구어(잘리다, 빨간 날, 젖 먹이다). 임베딩/하이브리드에서 다룰 것.
 - 평가셋 정답은 조문 원문을 직접 대조해 붙였다 (`note`에 근거 요약). 질문을 바꾸면 근거도 다시 확인할 것.
 
 ## 로드맵 (순서 미정)

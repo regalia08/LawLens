@@ -72,7 +72,10 @@ class Bm25Retriever:
         self.idf = {t: math.log(1 + (n - f + 0.5) / (f + 0.5)) for t, f in df.items()}
 
     def __call__(self, query: str, k: int) -> list[dict]:
-        terms = Counter(bigrams(query))
+        return self.search(Counter(bigrams(query)), k)
+
+    def search(self, terms: dict[str, float], k: int) -> list[dict]:
+        """terms: 토큰 -> 질의 가중치 (확장어는 원래 질문보다 낮게 줄 수 있다)."""
         scored = []
         for i, (doc, length) in enumerate(zip(self.docs, self.lens)):
             s = 0.0
@@ -85,6 +88,23 @@ class Bm25Retriever:
                 scored.append((s, i))
         scored.sort(reverse=True)
         return [{**self.chunks[i], "score": s} for s, i in scored[:k]]
+
+
+class ExpandedBm25Retriever:
+    """질문 토큰(가중치 1) + 일상용어->법령용어 확장 토큰(가중치 weight)으로 BM25 검색."""
+
+    def __init__(self, bm25: Bm25Retriever, expander, weight: float = 0.5):
+        self.bm25, self.expander, self.weight = bm25, expander, weight
+
+    def query_terms(self, query: str) -> dict[str, float]:
+        terms: dict[str, float] = Counter(bigrams(query))
+        for term in self.expander.expand(query):
+            for t in bigrams(term):
+                terms[t] = terms.get(t, 0) + self.weight
+        return terms
+
+    def __call__(self, query: str, k: int) -> list[dict]:
+        return self.bm25.search(self.query_terms(query), k)
 
 
 # ---------------------------------------------------------------- 지표
@@ -134,14 +154,38 @@ def main(argv=None) -> None:
     ap.add_argument("--questions", default="eval/questions.jsonl")
     ap.add_argument("--today", help="만료 판정 기준일 (YYYY-MM-DD, 기본: 오늘)")
     ap.add_argument("--show-misses", action="store_true", help="top-3 밖 질문 출력")
+    ap.add_argument("--retriever", choices=["bm25", "bm25+terms"], default="bm25")
+    ap.add_argument("--weight", type=float, default=0.5, help="확장어 가중치 (bm25+terms)")
+    ap.add_argument(
+        "--fetch-terms", action="store_true", help="캐시에 없는 단어를 법제처 API로 조회해 캐시에 추가 (.env의 LAW_OC 필요)"
+    )
     args = ap.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     chunks, _ = load_corpus(Path(args.data), today)
-    result = evaluate(load_questions(Path(args.questions)), Bm25Retriever(chunks))
+    questions = load_questions(Path(args.questions))
+    bm25 = Bm25Retriever(chunks)
+    expander = None
+    if args.retriever == "bm25":
+        retriever, name = bm25, "bm25-char-bigram"
+    else:
+        from term_expansion import QueryExpander, TermLexicon
+
+        oc = None
+        if args.fetch_terms:
+            from fetch_law import load_oc
+
+            oc = load_oc()
+        lexicon = TermLexicon(online=args.fetch_terms, oc=oc)
+        expander = QueryExpander(lexicon, [c["text"] for c in chunks])
+        retriever = ExpandedBm25Retriever(bm25, expander, args.weight)
+        name = f"bm25-char-bigram + 일상용어 확장(w={args.weight})"
+    result = evaluate(questions, retriever)
+    if expander:
+        expander.lexicon.save()
 
     rows = result.pop("rows")
-    print(f"retriever: bm25-char-bigram | chunks: {len(chunks)} | 기준일 {today}")
+    print(f"retriever: {name} | chunks: {len(chunks)} | 기준일 {today}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if args.show_misses:
         print("\n[top-3 밖]")
@@ -150,6 +194,8 @@ def main(argv=None) -> None:
                 top = ", ".join(f"{law} {art}" for law, art in r["top3"])
                 gold = ", ".join(f"{law} {art}" for law, art in r["gold"])
                 print(f"  {r['id']} rank={r['rank']} | {r['question']}\n      정답: {gold}\n      top3: {top}")
+                if expander:
+                    print(f"      확장: {', '.join(expander.expand(r['question'])) or '-'}")
 
 
 if __name__ == "__main__":
