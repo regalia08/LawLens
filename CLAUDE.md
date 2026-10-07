@@ -11,6 +11,9 @@
 - `test_law_parser.py`: 단위 테스트 (실제 근로기준법 응답에서 발췌한 픽스처)
 - `fetch_law.py`: 법령명 → 기준일에 시행 중인 버전 선택 → 본문 JSON을 `data/<법령명>_<시행일자>.json`로 저장
 - `test_fetch_law.py`: 버전 선택 테스트 (네트워크 없음)
+- `eval/questions.jsonl`: 평가셋. 일상어 질문 55개(정답 조문 = 법/시행령/시행규칙) + 범위 밖 8개(`expected: refuse`)
+- `eval_retrieval.py`: hit@1/3/5, MRR@10 (조문 단위, 정답 중 하나라도 맞으면 hit) + 기준선 BM25(글자 2-gram)
+- `test_eval_set.py`: 정답 조문이 실제 인덱스에 있는지(삭제/만료/오타) + 지표 계산 테스트
 - 실제 응답으로 검증함 (기준일 2026-10-07)
   - 근로기준법(시행 20261002): 132조 / 삭제 1 / 만료 1 / 일부만료 1 / 청크 152
   - 시행령(시행 20251023): 80조 / 삭제 5 / 부분만료 문구 2 (조문 유지) / 청크 78
@@ -20,6 +23,7 @@
 ```
 python -m unittest -v
 python fetch_law.py [법령명 ...] [--date YYYY-MM-DD]   # 기본: 근로기준법 3종, 오늘 기준
+python eval_retrieval.py --today YYYY-MM-DD --show-misses
 python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --max-chars 1000 --out out
 # -> out/articles.jsonl, out/chunks.jsonl, 통계, 만료 문구 검토 목록
 ```
@@ -51,6 +55,12 @@ python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --
 ## 청킹
 - 기본 단위 = 조. `max_chars`(기본 1000) 초과이고 살아있는 항이 2개 이상일 때만 항 단위로 분할.
 - 청크 텍스트는 "법령명 제N조(제목)\n본문" 형태로 시작, citation/chapter/chunk_id 메타데이터 포함.
+
+## 평가
+- 기준선 BM25 (기준일 2026-10-07, 청크 251): hit@1 0.327 / hit@3 0.400 / hit@5 0.473 / MRR@10 0.397
+- 놓치는 주 원인은 어휘 차이: 월급↔임금, 잘리다↔해고, 주휴수당↔유급휴일, 야근↔연장근로, 빌린 돈↔전차금.
+  → 로드맵 2번(일상용어→법령용어 확장)과 임베딩의 효과를 이 숫자 대비로 측정한다.
+- 평가셋 정답은 조문 원문을 직접 대조해 붙였다 (`note`에 근거 요약). 질문을 바꾸면 근거도 다시 확인할 것.
 
 ## 로드맵 (순서 미정)
 1. 시행령·시행규칙 목록 API로 조회 → 같은 파서로 처리, 법–시행령 연결
