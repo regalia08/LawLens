@@ -26,7 +26,7 @@ from datetime import date
 from pathlib import Path
 
 from answer import Answer, load_default_pipeline
-from eval_retrieval import gold_refs, load_questions
+from eval_retrieval import SPLITS, gold_refs, load_questions
 
 
 def answer_row(q: dict, a: Answer, seconds: float) -> dict:
@@ -75,7 +75,8 @@ def score_answers(rows: list[dict]) -> dict:
 def main(argv=None) -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--questions", default="eval/questions.jsonl")
+    ap.add_argument("--split", choices=list(SPLITS), default="dev", help="평가셋 (기본 dev)")
+    ap.add_argument("--questions", help="평가셋 파일 직접 지정 (--split보다 우선)")
     ap.add_argument("--today", help="만료 판정 기준일 (YYYY-MM-DD, 기본: 오늘)")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--embed-device")
@@ -84,7 +85,7 @@ def main(argv=None) -> None:
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     qa = load_default_pipeline(today, k=args.k, embed_device=args.embed_device)
-    questions = load_questions(Path(args.questions))
+    questions = load_questions(Path(args.questions or SPLITS[args.split]))
 
     rows = []
     for i, q in enumerate(questions, start=1):
@@ -96,11 +97,12 @@ def main(argv=None) -> None:
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"answers_{qa.llm.name.split('@')[0]}_k{args.k}.jsonl"
+    suffix = "" if args.split == "dev" and not args.questions else f"_{Path(args.questions).stem if args.questions else args.split}"
+    path = out / f"answers_{qa.llm.name.split('@')[0]}_k{args.k}{suffix}.jsonl"  # dev는 기존 파일명 유지
     path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
 
     summary = score_answers(rows)
-    print(f"\nllm: {qa.llm.name} | retriever: dense bge-m3 | k={args.k} | 기준일 {today}")
+    print(f"\nllm: {qa.llm.name} | retriever: dense bge-m3 | split: {args.questions or args.split} | k={args.k} | 기준일 {today}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"질문별 결과: {path}")
 

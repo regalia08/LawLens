@@ -9,22 +9,30 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from eval_retrieval import evaluate, gold_refs, load_corpus, load_questions, ranked_articles
+from eval_retrieval import SPLITS, evaluate, gold_refs, load_corpus, load_questions, ranked_articles
 
 ROOT = Path(__file__).parent
 TODAY = date(2026, 10, 7)
 
 
 class EvalSetIntegrityTests(unittest.TestCase):
+    """dev(eval/questions.jsonl)와 test(eval/test_questions.jsonl) 모두 검사."""
+
     @classmethod
     def setUpClass(cls):
-        cls.questions = load_questions(ROOT / "eval" / "questions.jsonl")
+        cls.splits = {name: load_questions(ROOT / path) for name, path in SPLITS.items()}
+        cls.questions = [q for qs in cls.splits.values() for q in qs]
         chunks, _ = load_corpus(ROOT / "data", TODAY)
         cls.indexed = {(c["law_name"], c["article_label"]) for c in chunks}
 
     def test_ids_unique(self):
+        # dev와 test를 합쳐도 id가 겹치지 않아야 결과 파일에서 섞이지 않는다
         ids = [q["id"] for q in self.questions]
         self.assertEqual(len(ids), len(set(ids)))
+
+    def test_no_identical_question_across_splits(self):
+        dev = {q["question"].strip() for q in self.splits["dev"]}
+        self.assertEqual([q["id"] for q in self.splits["test"] if q["question"].strip() in dev], [])
 
     def test_every_gold_article_is_indexed(self):
         missing = [
@@ -41,8 +49,11 @@ class EvalSetIntegrityTests(unittest.TestCase):
                     self.assertTrue(q["gold"])
 
     def test_size_matches_plan(self):
-        scoped = [q for q in self.questions if q.get("expected") != "refuse"]
-        self.assertGreaterEqual(len(scoped), 30)
+        for name, qs in self.splits.items():
+            with self.subTest(name):
+                scoped = [q for q in qs if q.get("expected") != "refuse"]
+                self.assertGreaterEqual(len(scoped), 30)
+                self.assertGreaterEqual(len(qs) - len(scoped), 5)
 
 
 def chunk(law, art):

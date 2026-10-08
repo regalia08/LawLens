@@ -39,6 +39,10 @@ def load_corpus(data_dir: Path, today: date, max_chars: int = 1000) -> tuple[lis
     return chunks, laws
 
 
+# dev: 개발 중 오답을 보며 쓰는 셋 (튜닝·선택은 여기서만). test: 따로 만든 홀드아웃 셋 (최종 후보만 측정).
+SPLITS = {"dev": "eval/questions.jsonl", "test": "eval/test_questions.jsonl"}
+
+
 def load_questions(path: Path) -> list[dict]:
     lines = path.read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines if line.strip()]
@@ -151,7 +155,8 @@ def main(argv=None) -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", default="data")
-    ap.add_argument("--questions", default="eval/questions.jsonl")
+    ap.add_argument("--split", choices=list(SPLITS), default="dev", help="평가셋 (기본 dev)")
+    ap.add_argument("--questions", help="평가셋 파일 직접 지정 (--split보다 우선)")
     ap.add_argument("--today", help="만료 판정 기준일 (YYYY-MM-DD, 기본: 오늘)")
     ap.add_argument("--show-misses", action="store_true", help="top-3 밖 질문 출력")
     ap.add_argument("--retriever", choices=["bm25", "bm25+terms", "dense", "hybrid"], default="bm25")
@@ -163,7 +168,7 @@ def main(argv=None) -> None:
 
     today = date.fromisoformat(args.today) if args.today else date.today()
     chunks, _ = load_corpus(Path(args.data), today)
-    questions = load_questions(Path(args.questions))
+    questions = load_questions(Path(args.questions or SPLITS[args.split]))
     bm25 = Bm25Retriever(chunks)
     expander = None
     if args.retriever == "bm25":
@@ -196,7 +201,7 @@ def main(argv=None) -> None:
         expander.lexicon.save()
 
     rows = result.pop("rows")
-    print(f"retriever: {name} | chunks: {len(chunks)} | 기준일 {today}")
+    print(f"retriever: {name} | split: {args.questions or args.split} | chunks: {len(chunks)} | 기준일 {today}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if args.show_misses:
         print("\n[top-3 밖]")
