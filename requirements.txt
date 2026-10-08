@@ -1,0 +1,6 @@
+# 파싱·평가(BM25)는 표준 라이브러리만 사용. 아래는 임베딩 검색과 로컬 LLM 답변용.
+# torch는 CUDA 버전에 맞게 설치 (https://pytorch.org/get-started/locally/), 검증 환경: 2.7.1+cu118
+torch>=2.6
+transformers>=5.12
+huggingface_hub>=1.19
+numpy>=2.1

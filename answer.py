@@ -139,7 +139,11 @@ def format_answer(a: Answer) -> str:
     lines = []
     if a.answerable:
         lines.append(a.answer)
-        titles = {(c["law_name"], c["article_label"]): c["citation"] for c in a.retrieved}
+        # 인용은 조 단위로 검증하므로 표시도 조 단위로 한다. 항 단위 청크의 citation("... 제4항")을
+        # 그대로 쓰면 실제 근거 항과 다른 항 번호가 보일 수 있다.
+        titles = {}
+        for c in a.retrieved:
+            titles.setdefault((c["law_name"], c["article_label"]), re.sub(r"\s*제\d+항$", "", c["citation"]))
         lines.append("\n[근거 조문]")
         lines += [f"- {titles.get(r, ' '.join(r))}" for r in a.citations]
     else:

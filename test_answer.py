@@ -127,6 +127,15 @@ class PipelineAndFormatTests(unittest.TestCase):
         self.assertIn("[검증 경고]", text)
         self.assertIn("근로기준법 제99조", text)
 
+    def test_sources_shown_at_article_level_for_paragraph_chunks(self):
+        # 항 단위로 쪼개진 청크가 여러 개 검색돼도 근거 표시는 조 단위 하나
+        p1 = {**chunk("근로기준법", "제74조", "임산부의 보호", "① 90일"), "citation": "근로기준법 제74조(임산부의 보호) 제1항"}
+        p4 = {**chunk("근로기준법", "제74조", "임산부의 보호", "④ 60일 유급"), "citation": "근로기준법 제74조(임산부의 보호) 제4항"}
+        a = build_answer("q", reply(answer="90일입니다 [근로기준법 제74조]"), [p4, p1])
+        text = format_answer(a)
+        self.assertIn("- 근로기준법 제74조(임산부의 보호)\n", text)
+        self.assertNotIn("제4항", text)
+
     def test_user_message_numbering(self):
         self.assertTrue(build_user_message("q", CHUNKS[:1]).startswith("[조문 1]\n"))
 
