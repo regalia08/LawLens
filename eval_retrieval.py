@@ -159,7 +159,7 @@ def main(argv=None) -> None:
     ap.add_argument("--questions", help="평가셋 파일 직접 지정 (--split보다 우선)")
     ap.add_argument("--today", help="만료 판정 기준일 (YYYY-MM-DD, 기본: 오늘)")
     ap.add_argument("--show-misses", action="store_true", help="top-3 밖 질문 출력")
-    ap.add_argument("--retriever", choices=["bm25", "bm25+terms", "dense", "hybrid"], default="bm25")
+    ap.add_argument("--retriever", choices=["bm25", "bm25+terms", "dense", "dense+lookup", "hybrid"], default="bm25")
     ap.add_argument("--weight", type=float, default=0.5, help="확장어 가중치 (bm25+terms)")
     ap.add_argument(
         "--fetch-terms", action="store_true", help="캐시에 없는 단어를 법제처 API로 조회해 캐시에 추가 (.env의 LAW_OC 필요)"
@@ -173,11 +173,15 @@ def main(argv=None) -> None:
     expander = None
     if args.retriever == "bm25":
         retriever, name = bm25, "bm25-char-bigram"
-    elif args.retriever == "dense":
+    elif args.retriever in ("dense", "dense+lookup"):
         from dense_retrieval import BgeM3Encoder, DenseRetriever
 
         encoder = BgeM3Encoder()
         retriever, name = DenseRetriever(chunks, encoder), encoder.name
+        if args.retriever == "dense+lookup":
+            from article_lookup import ArticleLookupRetriever
+
+            retriever, name = ArticleLookupRetriever(retriever, chunks), f"{name} + 조문 번호 조회"
     else:
         from term_expansion import QueryExpander, TermLexicon
 

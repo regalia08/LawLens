@@ -34,7 +34,8 @@ def main(argv=None) -> None:
         if args.show_context:
             print("[검색된 조문]")
             for c in a.retrieved:
-                print(f"  - {c['citation']} (score {c['score']:.3f})")
+                how = "조문 번호 지정" if c.get("pinned") else f"score {c['score']:.3f}"
+                print(f"  - {c['citation']} ({how})")
             print(f"[LLM 원본]\n{a.raw}\n")
         print(format_answer(a))
 

@@ -154,15 +154,20 @@ def format_answer(a: Answer) -> str:
     return "\n".join(lines)
 
 
-def load_default_pipeline(today, k: int = 5, embed_device: str | None = None, data_dir: str = "data") -> QAPipeline:
-    """현재 최고 검색기(bge-m3 dense) + 로컬 Qwen. 모델은 처음 실행 시 hf_cache/로 다운로드."""
+def load_default_pipeline(
+    today, k: int = 5, embed_device: str | None = None, data_dir: str = "data", lookup: bool = True
+) -> QAPipeline:
+    """검색(bge-m3 dense + 조문 번호 직접 조회) + 로컬 Qwen. 모델은 처음 실행 시 hf_cache/로 다운로드."""
     from pathlib import Path
 
+    from article_lookup import ArticleLookupRetriever
     from dense_retrieval import BgeM3Encoder, DenseRetriever
     from eval_retrieval import load_corpus
 
     chunks, _ = load_corpus(Path(data_dir), today)
     retriever = DenseRetriever(chunks, BgeM3Encoder(device=embed_device))
+    if lookup:
+        retriever = ArticleLookupRetriever(retriever, chunks)
     return QAPipeline(retriever, QwenLLM(), k=k)
 
 

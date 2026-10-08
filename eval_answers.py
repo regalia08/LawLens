@@ -81,10 +81,12 @@ def main(argv=None) -> None:
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--embed-device")
     ap.add_argument("--out-dir", default="eval/results")
+    ap.add_argument("--no-lookup", action="store_true", help="조문 번호 직접 조회 끄기 (변경 전 비교용)")
+    ap.add_argument("--tag", help="결과 파일명 뒤에 붙일 이름 (기존 결과 파일 보존용)")
     args = ap.parse_args(argv)
 
     today = date.fromisoformat(args.today) if args.today else date.today()
-    qa = load_default_pipeline(today, k=args.k, embed_device=args.embed_device)
+    qa = load_default_pipeline(today, k=args.k, embed_device=args.embed_device, lookup=not args.no_lookup)
     questions = load_questions(Path(args.questions or SPLITS[args.split]))
 
     rows = []
@@ -98,11 +100,12 @@ def main(argv=None) -> None:
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     suffix = "" if args.split == "dev" and not args.questions else f"_{Path(args.questions).stem if args.questions else args.split}"
+    suffix += f"_{args.tag}" if args.tag else ""
     path = out / f"answers_{qa.llm.name.split('@')[0]}_k{args.k}{suffix}.jsonl"  # dev는 기존 파일명 유지
     path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
 
     summary = score_answers(rows)
-    print(f"\nllm: {qa.llm.name} | retriever: dense bge-m3 | split: {args.questions or args.split} | k={args.k} | 기준일 {today}")
+    print(f"\nllm: {qa.llm.name} | retriever: dense bge-m3{'' if args.no_lookup else ' + 조문 번호 조회'} | split: {args.questions or args.split} | k={args.k} | 기준일 {today}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"질문별 결과: {path}")
 
