@@ -19,6 +19,10 @@
 - `dense_retrieval.py`: bge-m3 임베딩 검색(numpy 전수 비교) + RRF 하이브리드. 모델은 `hf_cache/`(또는 `.env`의 `LAWLENS_MODEL_DIR`),
   청크 임베딩 캐시는 `.cache/embeddings/` (둘 다 git 제외). 모델 리비전 고정.
 - `test_dense_retrieval.py`: 가짜 인코더로 순위·캐시·RRF 테스트 (모델/GPU 불필요)
+- `answer.py`: 검색(top-5) → 로컬 LLM(JSON 응답) → 코드로 인용 검증 → 면책 문구. LLM은 `generate(system, user)`만 맞추면 교체 가능
+- `ask.py`: 질문 CLI (`python ask.py "질문"`, 인자 없으면 대화형, `--show-context`)
+- `eval_answers.py`: 63문항 답변 평가(거절/인용 지표) → `eval/results/answers_*.jsonl`
+- `test_answer.py`: 가짜 LLM으로 JSON 파싱·인용 검증·거절·면책 문구·지표 테스트
 - 실제 응답으로 검증함 (기준일 2026-10-07)
   - 근로기준법(시행 20261002): 132조 / 삭제 1 / 만료 1 / 일부만료 1 / 청크 152
   - 시행령(시행 20251023): 80조 / 삭제 5 / 부분만료 문구 2 (조문 유지) / 청크 78
@@ -31,6 +35,8 @@ python fetch_law.py [법령명 ...] [--date YYYY-MM-DD]   # 기본: 근로기준
 python eval_retrieval.py --today YYYY-MM-DD --show-misses
 python eval_retrieval.py --today YYYY-MM-DD --retriever bm25+terms [--fetch-terms]   # 캐시만으로 재현, --fetch-terms는 OC 필요
 python eval_retrieval.py --today YYYY-MM-DD --retriever dense|hybrid               # 첫 실행 시 bge-m3 다운로드(~2.3GB)
+python ask.py "질문" [--show-context]                # 첫 실행 시 Qwen3-4B-Instruct 다운로드(~8GB)
+python eval_answers.py --today YYYY-MM-DD             # 63문항 약 9분 (RTX 4070)
 python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --max-chars 1000 --out out
 # -> out/articles.jsonl, out/chunks.jsonl, 통계, 만료 문구 검토 목록
 ```
@@ -82,6 +88,20 @@ python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --
   - 가중 RRF 등으로 맞추면 55문항 과적합이라 하지 않음. 현재 기본 검색기는 dense.
   - 하이브리드 코드는 유지: 조문 번호·정확한 법률용어 질의("제60조")에서는 어휘 검색이 강할 수 있는데
     평가셋에 그런 질문이 없다. 그 유형을 평가셋(dev/test 분리)에 넣은 뒤 다시 판단.
+## 답변 생성
+- LLM: Qwen/Qwen3-4B-Instruct-2507 (Apache-2.0, bf16 8GB, 12GB GPU에 양자화 없이), 리비전 고정, greedy 디코딩(재현성).
+  MVP라 로컬 선택. Claude API로 바꾸면 `generate()`만 교체.
+- 규칙: 제공 조문만 근거, 문장마다 [법령명 제N조] 인용, 범위 밖·근거 없음은 거절. JSON으로 받음.
+- 코드가 보장하는 것: 검색 결과에 없는 인용은 무효 처리, 유효 인용 없는 답변은 거절로 강등,
+  JSON 파싱 실패는 거절, 면책 문구는 항상 코드가 붙임.
+- 형식 준수: 처음엔 모델이 JSON 대신 일반 문장으로 답함 → 질문 뒤 형식 재지시 + 응답 첫 글자 '{' 프리필로 해결 (파싱 오류 0%).
+- 결과 (k=5, dense 검색): 범위 밖 거절 8/8, 오거절 0.109(6/55), 정답 조문 인용 0.818(45/55),
+  근거에 정답 포함 0.873, 무효 인용 0.016(1/63), 파싱 오류 0, 질문당 평균 8.2초.
+- 수동 검토 (`eval/results/review_*.md`): 정답 조문 인용 45건 중 내용 정확 39, 부분 오류 3, 결론 반대 3(q11, q23, q38).
+  오거절 6건 중 5건은 정답 조문이 근거에 없어서(검색 실패) → 근거 없으면 거절하는 설계대로 동작.
+  오류는 여러 조문·예외 조건을 연결해야 하는 질문에 집중 → 4B 모델 한계. 더 큰 모델과 같은 평가셋으로 비교할 것.
+
+## 평가셋 메모
 - 평가셋 정답은 조문 원문을 직접 대조해 붙였다 (`note`에 근거 요약). 질문을 바꾸면 근거도 다시 확인할 것.
 
 ## 로드맵 (순서 미정)
@@ -90,7 +110,7 @@ python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --
 3. 임베딩 + 벡터 저장소, 하이브리드 검색 (임베딩·RRF 완료, 벡터 DB는 규모 커지면)
 4. 테이블 스키마: law_version / article / article_chunk
 5. 평가셋 30~50문항, hit@3
-6. 조문 간 참조 추출, 답변의 인용 검증(코드로), 거절 규칙
+6. 조문 간 참조 추출, 답변의 인용 검증(코드로), 거절 규칙 (인용 검증·거절 완료, 참조 추출은 아직)
 7. 시행일/개정 이력 반영 (버전별 인덱스)
 
 ## 작업 방식
