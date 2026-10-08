@@ -188,6 +188,14 @@ flowchart LR
 
 ## 실행
 
+### 간단 실행 (Windows)
+
+1. Python 3.10 이상을 설치합니다 (설치 시 "Add python.exe to PATH" 체크).
+2. 저장소를 내려받고 `setup.bat`을 실행합니다. 가상환경 `.venv`를 만들고 PyTorch(NVIDIA GPU가 있으면 CUDA 11.8, 없으면 CPU)와 패키지를 설치한 뒤 테스트로 확인합니다.
+3. `run.bat`을 더블클릭하면 대화형 질문 창이 뜹니다. 첫 실행 때 모델 약 10GB를 `hf_cache/`로 받습니다.
+
+### 직접 실행
+
 요구 사항: Python 3.12.
 - 테스트, 파싱, BM25 평가는 CPU에서도 실행할 수 있습니다. 파싱과 BM25 평가는 표준 라이브러리만 사용합니다.
 - 임베딩 검색과 LLM 답변 생성은 NVIDIA GPU 사용을 권장합니다(검증 환경 RTX 4070 12GB).
