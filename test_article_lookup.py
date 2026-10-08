@@ -67,8 +67,16 @@ class RetrieverTests(unittest.TestCase):
     def test_referenced_article_pinned_first_and_deduped(self):
         self.assertEqual(self.ids("근로기준법 제21조 원문"), [f"{LAW}:제21조", f"{LAW}:제60조", f"{DECREE}:제30조"])
 
-    def test_paragraph_chunk_first_when_paragraph_given(self):
-        self.assertEqual(self.ids("제23조 제2항", k=2), [f"{LAW}:제23조:p2", f"{LAW}:제23조:p1"])
+    def test_only_given_paragraph_pinned_for_split_article(self):
+        # 항을 지정하면 그 항 청크만 고정하고 나머지 자리는 검색 결과로 (t18 결함 수정)
+        self.assertEqual(self.ids("제23조 제2항", k=2), [f"{LAW}:제23조:p2", f"{LAW}:제60조"])
+
+    def test_split_article_without_paragraph_pins_at_most_two_by_rank(self):
+        big = [chunk(LAW, "제74조", i) for i in range(1, 7)]
+        base = lambda q, k: [big[4], CHUNKS[3], big[1], CHUNKS[0]][:k]
+        r = ArticleLookupRetriever(base, CHUNKS + big)
+        ids = [c["chunk_id"] for c in r("근로기준법 제74조 내용", 4)]
+        self.assertEqual(ids, [f"{LAW}:제74조:p5", f"{LAW}:제74조:p2", f"{LAW}:제60조", f"{LAW}:제21조"])
 
     def test_no_reference_returns_base_results(self):
         self.assertEqual(self.ids("월급이 밀렸어요"), [f"{LAW}:제60조", f"{LAW}:제21조", f"{DECREE}:제30조"])

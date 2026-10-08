@@ -82,6 +82,12 @@ class MetricTests(unittest.TestCase):
         self.assertEqual((r["hit@1"], r["hit@3"], r["hit@5"]), (0.0, 0.5, 1.0))
         self.assertEqual(r["mrr@10"], round((1 / 2 + 1 / 4) / 2, 3))
 
+    def test_ctx_counts_chunks_not_articles(self):
+        # 같은 조 청크 3개 뒤에 정답이 있으면 조 단위 순위는 2위지만 상위 청크 3개(근거) 안에는 없다
+        r = evaluate(self.QS[:1], lambda q, k: self.RESULTS[q], ks=(3,), context_k=3)
+        self.assertEqual(r["hit@3"], 1.0)
+        self.assertEqual(r["ctx@3"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

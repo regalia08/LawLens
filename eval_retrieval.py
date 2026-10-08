@@ -123,15 +123,22 @@ def ranked_articles(chunks: list[dict]) -> list[tuple[str, str]]:
     return out
 
 
-def evaluate(questions: list[dict], retrieve: Retriever, ks=(1, 3, 5), depth: int = 50) -> dict:
+def evaluate(
+    questions: list[dict], retrieve: Retriever, ks=(1, 3, 5), depth: int = 50, context_k: int = 5
+) -> dict:
+    """hit@k는 청크를 조 단위로 묶은 순위 기준. ctx@context_k는 LLM에 실제로 넘기는 상위 청크 context_k개 안에
+    정답 조문이 있는지 본다 (한 조문의 청크 여러 개가 근거 자리를 차지하는 문제는 hit@k로는 안 보인다)."""
     scoped = [q for q in questions if q.get("expected") != "refuse"]
     hits = {k: 0 for k in ks}
+    ctx_hits = 0
     rr_sum = 0.0
     by_cat = defaultdict(lambda: [0, 0])  # category -> [hit@3, total]
     rows = []
     for q in scoped:
-        ranking = ranked_articles(retrieve(q["question"], depth))
+        retrieved = retrieve(q["question"], depth)
+        ranking = ranked_articles(retrieved)
         gold = gold_refs(q)
+        ctx_hits += bool({article_ref(c) for c in retrieved[:context_k]} & gold)
         rank = next((i + 1 for i, ref in enumerate(ranking) if ref in gold), None)
         for k in ks:
             hits[k] += rank is not None and rank <= k
@@ -145,6 +152,7 @@ def evaluate(questions: list[dict], retrieve: Retriever, ks=(1, 3, 5), depth: in
         "out_of_scope_skipped": len(questions) - n,
         **{f"hit@{k}": round(hits[k] / n, 3) for k in ks},
         "mrr@10": round(rr_sum / n, 3),
+        f"ctx@{context_k}": round(ctx_hits / n, 3),
         "by_category_hit@3": {c: f"{h}/{t}" for c, (h, t) in sorted(by_cat.items())},
         "rows": rows,
     }

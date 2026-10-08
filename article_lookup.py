@@ -10,6 +10,10 @@
   근로기준법에도 같은 번호가 있어서, 잘못 고정하면 엉뚱한 근거로 답하게 된다.
 - 인덱스에 없는 조문(삭제·만료, 없는 번호)은 고정하지 않는다.
 - 근거 개수 k는 그대로다. 고정한 조문이 자리를 차지하는 만큼 기존 검색 결과가 뒤로 밀린다.
+- 항 단위로 쪼개진 긴 조문은 청크를 전부 고정하지 않는다 (test t18에서 제74조 청크 10개가 근거 5자리를 독점해
+  정답 제74조의2가 밀려난 결함). 항을 지정하면 그 항 청크 하나만, 지정하지 않으면 검색 순위가 높은 청크
+  최대 MAX_CHUNKS_PER_ARTICLE개만 고정한다. 2는 "근거 5자리 중 3자리 이상을 검색 결과에 남긴다"는 기준으로
+  미리 정한 값이다 (평가셋 점수로 고른 값 아님).
 """
 from __future__ import annotations
 
@@ -19,6 +23,8 @@ LAW = "근로기준법"
 DECREE = "근로기준법 시행령"
 RULE = "근로기준법 시행규칙"
 OWN_LAW_WORDS = {"근로기준법", "근기법", "법"}
+MAX_CHUNKS_PER_ARTICLE = 2
+RANK_DEPTH = 50  # 고정할 청크를 고를 때 참고하는 기존 검색 결과 깊이
 
 # "제 56 조 제3항", "23조", "제43조의2", "제76조의3 제6항"
 ARTICLE_RE = re.compile(r"(?<!\d)제?\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?:\s*제?\s*(\d+)\s*항)?")
@@ -58,17 +64,24 @@ class ArticleLookupRetriever:
         for c in chunks:
             self.by_article.setdefault((c["law_name"], c["article_label"]), []).append(c)
 
-    def pinned(self, question: str) -> list[dict]:
+    def pinned(self, question: str, rank: dict[str, int] | None = None) -> list[dict]:
+        """질문이 지정한 조문의 청크. rank: chunk_id -> 기존 검색 순위 (청크가 여러 개인 조문에서 고를 때 사용)."""
+        rank = rank or {}
         out = []
         for law, label, para in parse_refs(question):
             found = self.by_article.get((law, label), [])
-            # 항을 지정했으면 그 항 청크를 먼저 (조 단위 청크면 순서 그대로)
-            found = sorted(found, key=lambda c: c.get("paragraph_no") != para) if para else found
-            out += [{**c, "score": 1.0, "pinned": True} for c in found if c not in out]
+            if len(found) > 1:
+                exact = [c for c in found if para and c.get("paragraph_no") == para]
+                if exact:
+                    found = exact
+                else:
+                    by_rank = sorted(found, key=lambda c: (rank.get(c["chunk_id"], len(rank)), c.get("paragraph_no") or 0))
+                    found = by_rank[: 1 if para else MAX_CHUNKS_PER_ARTICLE]
+            out += [{**c, "score": 1.0, "pinned": True} for c in found if c["chunk_id"] not in {o["chunk_id"] for o in out}]
         return out
 
     def __call__(self, question: str, k: int) -> list[dict]:
-        pinned = self.pinned(question)
+        base = self.base(question, max(k, RANK_DEPTH))
+        pinned = self.pinned(question, {c["chunk_id"]: i for i, c in enumerate(base)})
         ids = {c["chunk_id"] for c in pinned}
-        rest = [c for c in self.base(question, k + len(pinned)) if c["chunk_id"] not in ids]
-        return (pinned + rest)[:k]
+        return (pinned + [c for c in base if c["chunk_id"] not in ids])[:k]
