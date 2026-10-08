@@ -154,7 +154,7 @@ def main(argv=None) -> None:
     ap.add_argument("--questions", default="eval/questions.jsonl")
     ap.add_argument("--today", help="만료 판정 기준일 (YYYY-MM-DD, 기본: 오늘)")
     ap.add_argument("--show-misses", action="store_true", help="top-3 밖 질문 출력")
-    ap.add_argument("--retriever", choices=["bm25", "bm25+terms"], default="bm25")
+    ap.add_argument("--retriever", choices=["bm25", "bm25+terms", "dense", "hybrid"], default="bm25")
     ap.add_argument("--weight", type=float, default=0.5, help="확장어 가중치 (bm25+terms)")
     ap.add_argument(
         "--fetch-terms", action="store_true", help="캐시에 없는 단어를 법제처 API로 조회해 캐시에 추가 (.env의 LAW_OC 필요)"
@@ -168,6 +168,11 @@ def main(argv=None) -> None:
     expander = None
     if args.retriever == "bm25":
         retriever, name = bm25, "bm25-char-bigram"
+    elif args.retriever == "dense":
+        from dense_retrieval import BgeM3Encoder, DenseRetriever
+
+        encoder = BgeM3Encoder()
+        retriever, name = DenseRetriever(chunks, encoder), encoder.name
     else:
         from term_expansion import QueryExpander, TermLexicon
 
@@ -180,6 +185,12 @@ def main(argv=None) -> None:
         expander = QueryExpander(lexicon, [c["text"] for c in chunks])
         retriever = ExpandedBm25Retriever(bm25, expander, args.weight)
         name = f"bm25-char-bigram + 일상용어 확장(w={args.weight})"
+        if args.retriever == "hybrid":
+            from dense_retrieval import BgeM3Encoder, DenseRetriever, HybridRetriever
+
+            encoder = BgeM3Encoder()
+            retriever = HybridRetriever([retriever, DenseRetriever(chunks, encoder)])
+            name = f"RRF[{name}, {encoder.name}]"
     result = evaluate(questions, retriever)
     if expander:
         expander.lexicon.save()

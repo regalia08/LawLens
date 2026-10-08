@@ -16,6 +16,9 @@
 - `test_eval_set.py`: 정답 조문이 실제 인덱스에 있는지(삭제/만료/오타) + 지표 계산 테스트
 - `term_expansion.py`: 일상용어→법령용어 쿼리 확장 (법제처 dlytrm/dlytrmRlt), 응답 캐시 `data/terms/dlytrm_cache.json`
 - `test_term_expansion.py`: 확장 로직 테스트 (네트워크 없음)
+- `dense_retrieval.py`: bge-m3 임베딩 검색(numpy 전수 비교) + RRF 하이브리드. 모델은 `hf_cache/`(또는 `.env`의 `LAWLENS_MODEL_DIR`),
+  청크 임베딩 캐시는 `.cache/embeddings/` (둘 다 git 제외). 모델 리비전 고정.
+- `test_dense_retrieval.py`: 가짜 인코더로 순위·캐시·RRF 테스트 (모델/GPU 불필요)
 - 실제 응답으로 검증함 (기준일 2026-10-07)
   - 근로기준법(시행 20261002): 132조 / 삭제 1 / 만료 1 / 일부만료 1 / 청크 152
   - 시행령(시행 20251023): 80조 / 삭제 5 / 부분만료 문구 2 (조문 유지) / 청크 78
@@ -27,6 +30,7 @@ python -m unittest -v
 python fetch_law.py [법령명 ...] [--date YYYY-MM-DD]   # 기본: 근로기준법 3종, 오늘 기준
 python eval_retrieval.py --today YYYY-MM-DD --show-misses
 python eval_retrieval.py --today YYYY-MM-DD --retriever bm25+terms [--fetch-terms]   # 캐시만으로 재현, --fetch-terms는 OC 필요
+python eval_retrieval.py --today YYYY-MM-DD --retriever dense|hybrid               # 첫 실행 시 bge-m3 다운로드(~2.3GB)
 python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --max-chars 1000 --out out
 # -> out/articles.jsonl, out/chunks.jsonl, 통계, 만료 문구 검토 목록
 ```
@@ -70,12 +74,20 @@ python -I law_parser.py data/근로기준법_20261002.json --today YYYY-MM-DD --
     사전에 정한 0.5 유지. 더 튜닝하려면 평가셋을 dev/test로 나눌 것.
   - 남은 문제: 흔한 단어의 잡음 확장(회사→기업·법인·자사, 사람→자연인, 기한→숫자들),
     사전에 없는 구어(잘리다, 빨간 날, 젖 먹이다). 임베딩/하이브리드에서 다룰 것.
+- 임베딩 (bge-m3@5617a9f6, dense만, max_length 1024): hit@1 0.727 / hit@3 **0.836** / hit@5 0.873 / MRR@10 0.796 ← 현재 최고
+  - BM25+확장 대비 hit@3 +0.327. 구어(잘리다, 빨간 날, 젖 먹이다)도 대부분 잡는다. 해고·휴가·수당·모성보호 전부 hit.
+  - 남은 오답: 휴일 0/2(주휴수당·빨간 날 → 제55조), 관리자 적용제외(q25 rank 30), 임금 시효(q12), 단시간 15시간(q36).
+- 하이브리드 RRF[BM25+확장, bge-m3] (k=60, 가중치 없음): hit@1 0.600 / hit@3 0.727 / hit@5 0.800 / MRR@10 0.683
+  - **dense 단독보다 악화** (hit@3 -0.109). 어휘 검색(0.509)이 훨씬 약해 동일 비중 RRF가 dense 상위를 끌어내림.
+  - 가중 RRF 등으로 맞추면 55문항 과적합이라 하지 않음. 현재 기본 검색기는 dense.
+  - 하이브리드 코드는 유지: 조문 번호·정확한 법률용어 질의("제60조")에서는 어휘 검색이 강할 수 있는데
+    평가셋에 그런 질문이 없다. 그 유형을 평가셋(dev/test 분리)에 넣은 뒤 다시 판단.
 - 평가셋 정답은 조문 원문을 직접 대조해 붙였다 (`note`에 근거 요약). 질문을 바꾸면 근거도 다시 확인할 것.
 
 ## 로드맵 (순서 미정)
 1. 시행령·시행규칙 목록 API로 조회 → 같은 파서로 처리, 법–시행령 연결
 2. 일상용어→법령용어 쿼리 확장 (지능형 법령정보지식베이스 API: 일상용어-법령용어 연계)
-3. 임베딩 + 벡터 저장소, 하이브리드 검색
+3. 임베딩 + 벡터 저장소, 하이브리드 검색 (임베딩·RRF 완료, 벡터 DB는 규모 커지면)
 4. 테이블 스키마: law_version / article / article_chunk
 5. 평가셋 30~50문항, hit@3
 6. 조문 간 참조 추출, 답변의 인용 검증(코드로), 거절 규칙
